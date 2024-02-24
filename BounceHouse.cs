@@ -19,7 +19,7 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
     private Order globalOrder;
 
-    private const String sVersion = "Beta 1.1";
+    private const String sVersion = "Beta 1.2";
     private const int ACTIVE = 1;
     private const int STOPPED = 2;
     private int _lastBar = -1;
