@@ -37,9 +37,12 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private DateTime dtStart = DateTime.Now;
     private String sLastTrade = String.Empty;
     private String sLastLog = String.Empty;
-    private bool bExitKama9 = false;
+    private bool bAttendedMode = true;
     private int iMinADX = 0;
     private decimal iBuffer = 0;
+
+    [Display(GroupName = "General", Name = "Attended Mode", Description = "You handle the stops, take profits")]
+    public bool AttendedMode { get => bAttendedMode; set { bAttendedMode = value; RecalculateValues(); } }
 
     #endregion
 
@@ -192,39 +195,42 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
         bool closeLong = (red && candle.Open < t3 && candle.Close < t3) && CurrentPosition > 0;
         bool closeShort = (green && candle.Open > t3 && candle.Close > t3) && CurrentPosition < 0;
 
-        if ((red && candle.Open < t3 && candle.Close < t3) && CurrentPosition > 0)
+        if (!bAttendedMode && red && candle.Open < t3 && candle.Close < t3 && CurrentPosition > 0)
         {
-            //CloseCurrentPosition("T3 crossed", bar);
+            CloseCurrentPosition("T3 crossed", bar);
             prevBar = -1;
         }
-        if ((green && candle.Open > t3 && candle.Close > t3) && CurrentPosition < 0)
+        if (!bAttendedMode && green && candle.Open > t3 && candle.Close > t3 && CurrentPosition < 0)
         {
-            //CloseCurrentPosition("T3 crossed", bar);
+            CloseCurrentPosition("T3 crossed", bar);
             prevBar = -1;
         }
-
+/*
         if (sLastTrade.Contains("KAMA") && sLastTrade.Contains("LONG") && red && candle.Close < kama9 && CurrentPosition > 0)
             CloseCurrentPosition("Kama crossed", bar);
         if (sLastTrade.Contains("KAMA") && sLastTrade.Contains("SHORT") && green && candle.Close > kama9 && CurrentPosition < 0)
             CloseCurrentPosition("Kama crossed", bar);
-        if (kamaLong)
-            OpenPosition("KAMA wick", candle, bar, OrderDirections.Buy);
-        if (kamaShort)
-            OpenPosition("KAMA wick", candle, bar, OrderDirections.Sell);
 
         if (sLastTrade.Contains("EMA 200") && sLastTrade.Contains("LONG") && red && candle.Close < e200 && CurrentPosition > 0)
             CloseCurrentPosition("EMA 200 crossed", bar);
         if (sLastTrade.Contains("EMA 200") && sLastTrade.Contains("SHORT") && green && candle.Close > e200 && CurrentPosition < 0)
             CloseCurrentPosition("EMA 200 crossed", bar);
-        if (ema200Long)
-            OpenPosition("EMA 200 wick", candle, bar, OrderDirections.Buy);
-        if (ema200Short)
-            OpenPosition("EMA 200 wick", candle, bar, OrderDirections.Sell);
 
         if (sLastTrade.Contains("VWAP") && sLastTrade.Contains("LONG") && red && candle.Close < vwap && CurrentPosition > 0)
             CloseCurrentPosition("VWAP crossed", bar);
         if (sLastTrade.Contains("VWAP") && sLastTrade.Contains("SHORT") && green && candle.Close > vwap && CurrentPosition < 0)
             CloseCurrentPosition("VWAP crossed", bar);
+*/
+        if (kamaLong)
+            OpenPosition("KAMA wick", candle, bar, OrderDirections.Buy);
+        if (kamaShort)
+            OpenPosition("KAMA wick", candle, bar, OrderDirections.Sell);
+
+        if (ema200Long)
+            OpenPosition("EMA 200 wick", candle, bar, OrderDirections.Buy);
+        if (ema200Short)
+            OpenPosition("EMA 200 wick", candle, bar, OrderDirections.Sell);
+
         if (vwapLong)
             OpenPosition("VWAP wick", candle, bar, OrderDirections.Buy);
         if (vwapShort)
@@ -364,18 +370,6 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
     #region MISC METHODS
 
-    private String GetReason(bool a, bool b, bool c, bool d, bool e)
-    {
-        var ham = CurrentPosition < 0 ? "Hammer candle" : "Reverse hammer candle";
-        // psarSell || m3 < 0 || BottomSq || CrossDown9 || revHammer
-        if (a) return "PSAR change";
-        if (b) return "MACD change";
-        if (c) return "Squeeze Relaxer";
-        if (d) return "KAMA 9 cross";
-        if (e) return ham;
-        return "";
-    }
-
     private bool IsPointInsideRectangle(Rectangle rectangle, Point point)
     {
         return point.X >= rectangle.X && point.X <= rectangle.X + rectangle.Width && point.Y >= rectangle.Y && point.Y <= rectangle.Y + rectangle.Height;
@@ -395,7 +389,6 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private void AddLog(String s)
     {
         sLastLog = s;
-        this.LogDebug(s);
     }
 
     #endregion
