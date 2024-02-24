@@ -28,9 +28,6 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
     private int iPrevOrderBar = -1;
     private int iFontSize = 12;
-    private int iAdvMaxContracts = 20;
-    private int iMaxLoss = 50000;
-    private int iMaxProfit = 50000;
     private int iBotStatus = ACTIVE;
     private Stopwatch clock = new Stopwatch();
     private Rectangle rc = new Rectangle() { X = 50, Y = 50, Height = 200, Width = 400 };
@@ -46,7 +43,11 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private bool bEnterKAMA9 = true;
     private bool bEnterVWAP = true;
     private bool bEnterEMA200 = true;
-    private bool bEnterEMA21 = true;
+    private bool bEnterEMA21 = false;
+
+    private int iAdvMaxContracts = 20;
+    private int iMaxLoss = 50000;
+    private int iMaxProfit = 50000;
 
     [Display(GroupName = "Trade When These Lines Wicked", Name = "Kaufman Avg 9")]
     public bool EnterKAMA9 { get => bEnterKAMA9; set { bEnterKAMA9 = value; RecalculateValues(); } }
