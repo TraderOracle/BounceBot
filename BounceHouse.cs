@@ -19,7 +19,7 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
     private Order globalOrder;
 
-    private const String sVersion = "Beta 1.0";
+    private const String sVersion = "Beta 1.1";
     private const int ACTIVE = 1;
     private const int STOPPED = 2;
     private int _lastBar = -1;
@@ -28,7 +28,7 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
     private int iPrevOrderBar = -1;
     private int iFontSize = 12;
-    private int iMaxContracts = 20;
+    private int iAdvMaxContracts = 20;
     private int iMaxLoss = 50000;
     private int iMaxProfit = 50000;
     private int iBotStatus = ACTIVE;
@@ -41,15 +41,49 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private int iMinADX = 0;
     private decimal iBuffer = 0;
 
+    #region TRADING OPTIONS
+
+    private bool bEnterKAMA9 = true;
+    private bool bEnterVWAP = true;
+    private bool bEnterEMA200 = true;
+    private bool bEnterEMA21 = true;
+
+    [Display(GroupName = "Trade When These Lines Wicked", Name = "Kaufman Avg 9")]
+    public bool EnterKAMA9 { get => bEnterKAMA9; set { bEnterKAMA9 = value; RecalculateValues(); } }
+
+    [Display(GroupName = "Trade When These Lines Wicked", Name = "Daily VWAP")]
+    public bool EnterVWAP { get => bEnterVWAP; set { bEnterVWAP = value; RecalculateValues(); } }
+
+    [Display(GroupName = "Trade When These Lines Wicked", Name = "200 EMA")]
+    public bool EnterEMA200 { get => bEnterEMA200; set { bEnterEMA200 = value; RecalculateValues(); } }
+
+    [Display(GroupName = "Trade When These Lines Wicked", Name = "21 EMA")]
+    public bool EnterEMA21 { get => bEnterEMA21; set { bEnterEMA21 = value; RecalculateValues(); } }
+
     [Display(GroupName = "General", Name = "Attended Mode", Description = "You handle the stops, take profits")]
     public bool AttendedMode { get => bAttendedMode; set { bAttendedMode = value; RecalculateValues(); } }
+
+    [Display(GroupName = "General", Name = "Max simultaneous contracts", Order = int.MaxValue)]
+    [Range(1, 90)]
+    public int AdvMaxContracts { get => iAdvMaxContracts; set { iAdvMaxContracts = value; RecalculateValues(); } }
+
+    [Display(GroupName = "General", Name = "Maximum Loss", Description = "Maximum amount of money lost before the bot shuts off")]
+    [Range(1, 90000)]
+    public int MaxLoss { get => iMaxLoss; set { iMaxLoss = value; RecalculateValues(); } }
+
+    [Display(GroupName = "General", Name = "Maximum Profit", Description = "Maximum profit before the bot shuts off")]
+    [Range(1, 90000)]
+    public int MaxProfit { get => iMaxProfit; set { iMaxProfit = value; RecalculateValues(); } }
+
+    #endregion
+
 
     #endregion
 
     #region INDICATORS
 
     private readonly VWAP _VWAP = new VWAP() { TWAPMode = VWAP.VWAPMode.VWAP, Period = 1, Days = 1, VolumeMode = VWAP.VolumeType.Total };
-    private readonly EMA slowEma = new EMA() { Period = 21 };
+    private readonly EMA Ema21 = new EMA() { Period = 21 };
     private readonly EMA Ema200 = new EMA() { Period = 200 };
     private readonly KAMA _kama9 = new KAMA() { ShortPeriod = 2, LongPeriod = 109, EfficiencyRatioPeriod = 9 };
     private readonly T3 _t3 = new T3() { Period = 10, Multiplier = 1 };
@@ -123,6 +157,22 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
         iBuffer = 10;
     }
 
+    protected int CheckLineWick(decimal line, bool chec, IndicatorCandle candle)
+    {
+        if (!chec)return 0;
+
+        var red = candle.Close < candle.Open;
+        var green = candle.Close > candle.Open;
+
+        if (green && candle.Open > line && candle.Low < line)
+            return 1;
+
+        if (red && candle.Open < line && candle.High > line)
+            return -1;
+
+        return 0;
+    }
+
     protected override void OnCalculate(int bar, decimal value)
     {
         if (bar == 0)
@@ -156,12 +206,12 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
         #region INDICATOR CALCULATIONS
 
-        slowEma.Calculate(pbar, value);
+        Ema21.Calculate(pbar, value);
         _t3.Calculate(pbar, value);
 
         var kama9 = ((ValueDataSeries)_kama9.DataSeries[0])[pbar];
         var e200 = ((ValueDataSeries)Ema200.DataSeries[0])[pbar];
-        var slow = ((ValueDataSeries)slowEma.DataSeries[0])[pbar];
+        var e21 = ((ValueDataSeries)Ema21.DataSeries[0])[pbar];
         var vwap = ((ValueDataSeries)_VWAP.DataSeries[0])[pbar];
         var t3 = ((ValueDataSeries)_t3.DataSeries[0])[pbar];
 
@@ -178,15 +228,6 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
         var c1R = p1C.Open > p1C.Close;
 
         var c0Body = Math.Abs(candle.Close - candle.Open);
-
-        bool kamaLong = green && candle.Open > kama9 && candle.Low < kama9;
-        bool kamaShort = red && candle.Open < kama9 && candle.High > kama9;
-
-        bool ema200Long = green && candle.Open > e200 && candle.Low < e200;
-        bool ema200Short = red && candle.Open < e200 && candle.High > e200;
-
-        bool vwapLong = green && candle.Open > vwap && candle.Low < vwap;
-        bool vwapShort = red && candle.Open < vwap && candle.High > vwap;
 
         #endregion
 
@@ -205,35 +246,25 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
             CloseCurrentPosition("T3 crossed", bar);
             prevBar = -1;
         }
-/*
-        if (sLastTrade.Contains("KAMA") && sLastTrade.Contains("LONG") && red && candle.Close < kama9 && CurrentPosition > 0)
-            CloseCurrentPosition("Kama crossed", bar);
-        if (sLastTrade.Contains("KAMA") && sLastTrade.Contains("SHORT") && green && candle.Close > kama9 && CurrentPosition < 0)
-            CloseCurrentPosition("Kama crossed", bar);
 
-        if (sLastTrade.Contains("EMA 200") && sLastTrade.Contains("LONG") && red && candle.Close < e200 && CurrentPosition > 0)
-            CloseCurrentPosition("EMA 200 crossed", bar);
-        if (sLastTrade.Contains("EMA 200") && sLastTrade.Contains("SHORT") && green && candle.Close > e200 && CurrentPosition < 0)
-            CloseCurrentPosition("EMA 200 crossed", bar);
-
-        if (sLastTrade.Contains("VWAP") && sLastTrade.Contains("LONG") && red && candle.Close < vwap && CurrentPosition > 0)
-            CloseCurrentPosition("VWAP crossed", bar);
-        if (sLastTrade.Contains("VWAP") && sLastTrade.Contains("SHORT") && green && candle.Close > vwap && CurrentPosition < 0)
-            CloseCurrentPosition("VWAP crossed", bar);
-*/
-        if (kamaLong)
+        if (CheckLineWick(kama9, bEnterKAMA9, candle) > 0)
             OpenPosition("KAMA wick", candle, bar, OrderDirections.Buy);
-        if (kamaShort)
+        if (CheckLineWick(kama9, bEnterKAMA9, candle) < 0)
             OpenPosition("KAMA wick", candle, bar, OrderDirections.Sell);
 
-        if (ema200Long)
+        if (CheckLineWick(e200, bEnterEMA200, candle) > 0)
             OpenPosition("EMA 200 wick", candle, bar, OrderDirections.Buy);
-        if (ema200Short)
+        if (CheckLineWick(e200, bEnterEMA200, candle) < 0)
             OpenPosition("EMA 200 wick", candle, bar, OrderDirections.Sell);
 
-        if (vwapLong)
+        if (CheckLineWick(e21, bEnterEMA21, candle) > 0)
+            OpenPosition("EMA 21 wick", candle, bar, OrderDirections.Buy);
+        if (CheckLineWick(e21, bEnterEMA21, candle) < 0)
+            OpenPosition("EMA 21 wick", candle, bar, OrderDirections.Sell);
+
+        if (CheckLineWick(vwap, bEnterVWAP, candle) > 0)
             OpenPosition("VWAP wick", candle, bar, OrderDirections.Buy);
-        if (vwapShort)
+        if (CheckLineWick(vwap, bEnterVWAP, candle) < 0)
             OpenPosition("VWAP wick", candle, bar, OrderDirections.Sell);
 
         #endregion
@@ -278,7 +309,7 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
             AddLog("Attempted to open position, but bot was stopped");
             return;
         }
-        if (CurrentPosition >= iMaxContracts)
+        if (CurrentPosition >= iAdvMaxContracts)
         {
             AddLog("Attempted to open more than (max) contracts, trade canceled");
             return;
