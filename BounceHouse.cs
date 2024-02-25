@@ -196,13 +196,25 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
             iRes = -1;
 
         if (iTradeDirection == 2 && iRes == -1) // Value = 2, Name = "Longs only"
-            return 0;
+        {
+            AddLog("Wanted to short, but settings: LONG ONLY");
+            iRes = 0;
+        }
         if (iTradeDirection == 3 && iRes == 1) // Value = 3, Name = "Shorts only"
-            return 0;
+        {
+            AddLog("Wanted to long, but settings: SHORT ONLY");
+            iRes = 0;
+        }
         if (iTradeDirection == 4 && iRes == 1 && st < 0) // Value = 4, Name = "With supertrend"
-            return 0;
+        {
+            AddLog("Skipped trade due to 'With Trend Only' setting");
+            iRes = 0;
+        }
         if (iTradeDirection == 4 && iRes == -1 && st > 0) // Value = 4, Name = "With supertrend"
-            return 0;
+        {
+            AddLog("Skipped trade due to 'With Trend Only' setting");
+            iRes = 0;
+        }
 
         return iRes;
     }
