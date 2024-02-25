@@ -8,12 +8,11 @@ using OFT.Rendering.Context;
 using OFT.Rendering.Tools;
 using OFT.Rendering.Control;
 using static ATAS.Indicators.Technical.SampleProperties;
-
-using String = System.String;
-using Utils.Common.Logging;
-using System;
 using OFT.Attributes.Editors;
 using System.Collections.ObjectModel;
+using String = System.String;
+using Color = System.Drawing.Color;
+using MColor = System.Windows.Media.Color;
 
 public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 {
@@ -21,7 +20,7 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
     private Order globalOrder;
 
-    private const String sVersion = "Beta 1.2";
+    private const String sVersion = "Beta 1.4";
     private const int ACTIVE = 1;
     private const int STOPPED = 2;
     private int _lastBar = -1;
@@ -37,7 +36,6 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private DateTime dtStart = DateTime.Now;
     private String sLastTrade = String.Empty;
     private String sLastLog = String.Empty;
-    private bool bAttendedMode = true;
     private int iMinADX = 0;
     private decimal iBuffer = 0;
 
@@ -49,14 +47,20 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private bool bEnterVWAP = true;
     private bool bEnterEMA200 = true;
     private bool bEnterEMA21 = false;
+    private bool bShowLines = true;
 
     private int iAdvMaxContracts = 20;
     private int iMaxLoss = 50000;
     private int iMaxProfit = 50000;
     private int iTradeDirection = 1;
+    private int iBotType = 1;
+
+    [Display(GroupName = "General", Name = "Show Lines")]
+    public bool ShowLines { get => bShowLines; set { bShowLines = value; RecalculateValues(); } }
 
     private class tradeDir : Collection<Entity>
     {
+
         public tradeDir()
             : base(new[]
             {
@@ -64,15 +68,27 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
                     new Entity { Value = 2, Name = "Longs only" },
                     new Entity { Value = 3, Name = "Shorts only" },
                     new Entity { Value = 4, Name = "With trend direction" },
-            })
-        { }
+            }) { }
     }
     [Display(GroupName = "General", Name = "Trade Direction")]
     [ComboBoxEditor(typeof(tradeDir), DisplayMember = nameof(Entity.Name), ValueMember = nameof(Entity.Value))]
     public int trDir { get => iTradeDirection; set { if (value < 0) return; iTradeDirection = value; RecalculateValues(); } }
 
-    [Display(GroupName = "General", Name = "Attended Mode", Description = "You handle the stops, take profits")]
-    public bool AttendedMode { get => bAttendedMode; set { bAttendedMode = value; RecalculateValues(); } }
+    private class botType : Collection<Entity>
+    {
+        public botType()
+            : base(new[]
+            {
+                    new Entity { Value = 1, Name = "Fully Automated" },
+                    new Entity { Value = 2, Name = "Trades but no stop" },
+                    new Entity { Value = 3, Name = "Indicator Mode (no trades)" },
+            })
+        { }
+    }
+    [Display(GroupName = "General", Name = "Bot Type")]
+    [ComboBoxEditor(typeof(botType), DisplayMember = nameof(Entity.Name), ValueMember = nameof(Entity.Value))]
+    public int botTyp { get => iBotType; set { if (value < 0) return; iBotType = value; RecalculateValues(); } }
+
 
     [Display(GroupName = "General", Name = "Max simultaneous contracts", Order = int.MaxValue)]
     [Range(1, 90)]
@@ -102,13 +118,21 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
     #region INDICATORS
 
-    private readonly VWAP _VWAP = new VWAP() { TWAPMode = VWAP.VWAPMode.VWAP, Period = 1, Days = 1, VolumeMode = VWAP.VolumeType.Total };
+    private readonly VWAP _VWAP = new VWAP() { VWAPOnly = true, Type = VWAP.VWAPPeriodType.Daily, TWAPMode = VWAP.VWAPMode.VWAP, VolumeMode = VWAP.VolumeType.Total, Period = 300 };
     private readonly EMA Ema21 = new EMA() { Period = 21 };
     private readonly EMA Ema200 = new EMA() { Period = 200 };
     private readonly KAMA _kama9 = new KAMA() { ShortPeriod = 2, LongPeriod = 109, EfficiencyRatioPeriod = 9 };
     private readonly T3 _t3 = new T3() { Period = 10, Multiplier = 1 };
     private readonly Pivots _pivots = new Pivots();
     private readonly SuperTrend _st = new SuperTrend() { Period = 11, Multiplier = 2m };
+
+    private readonly ValueDataSeries _posSeries = new("Regular Buy Signal") { Color = MColor.FromArgb(255, 0, 255, 0), VisualType = VisualMode.UpArrow, Width = 2 };
+    private readonly ValueDataSeries _negSeries = new("Regular Sell Signal") { Color = MColor.FromArgb(255, 255, 104, 48), VisualType = VisualMode.DownArrow, Width = 2 };
+
+    private readonly ValueDataSeries _lineVWAP = new("VWAP") { Color = MColor.FromArgb(180, 30, 114, 250), VisualType = VisualMode.Line, Width = 3 };
+    private readonly ValueDataSeries _lineEMA200 = new("EMA 200") { Color = MColor.FromArgb(255, 165, 166, 164), VisualType = VisualMode.Line, Width = 3 };
+    private readonly ValueDataSeries _lineEMA21 = new("EMA 21") { Color = MColor.FromArgb(180, 98, 252, 3), VisualType = VisualMode.Line, Width = 2 };
+    private readonly ValueDataSeries _lineKAMA = new("KAMA") { Color = MColor.FromArgb(180, 252, 186, 3), VisualType = VisualMode.Line, Width = 2 };
 
     #endregion
 
@@ -173,50 +197,20 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     public BounceHouse()
     {
         EnableCustomDrawing = true;
+
+        DataSeries[0] = _posSeries;
+        DataSeries.Add(_negSeries);
+        DataSeries.Add(_lineVWAP);
+        DataSeries.Add(_lineEMA200);
+        DataSeries.Add(_lineEMA21);
+        DataSeries.Add(_lineKAMA);
+
         Add(_kama9);
         Add(_VWAP);
         Add(_pivots);
         Add(_st);
 
         iBuffer = 10;
-    }
-
-    protected int CheckLineWick(decimal line, bool chec, IndicatorCandle candle)
-    {
-        int iRes = 0;
-        if (!chec) return 0;
-
-        var red = candle.Close < candle.Open;
-        var green = candle.Close > candle.Open;
-
-        if (green && candle.Open > line && candle.Low < line)
-            iRes = 1;
-
-        if (red && candle.Open < line && candle.High > line)
-            iRes = -1;
-
-        if (iTradeDirection == 2 && iRes == -1) // Value = 2, Name = "Longs only"
-        {
-            AddLog("Wanted to short, but settings: LONG ONLY");
-            iRes = 0;
-        }
-        if (iTradeDirection == 3 && iRes == 1) // Value = 3, Name = "Shorts only"
-        {
-            AddLog("Wanted to long, but settings: SHORT ONLY");
-            iRes = 0;
-        }
-        if (iTradeDirection == 4 && iRes == 1 && st < 0) // Value = 4, Name = "With supertrend"
-        {
-            AddLog("Skipped trade due to 'With Trend Only' setting");
-            iRes = 0;
-        }
-        if (iTradeDirection == 4 && iRes == -1 && st > 0) // Value = 4, Name = "With supertrend"
-        {
-            AddLog("Skipped trade due to 'With Trend Only' setting");
-            iRes = 0;
-        }
-
-        return iRes;
     }
 
     protected override void OnCalculate(int bar, decimal value)
@@ -226,8 +220,8 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
             _lastBarCounted = false;
             return;
         }
-        else if (bar < CurrentBar - 3)
-            return;
+//        else if (bar < CurrentBar - 3)
+//            return;
 
         if (ClosedPnL >= Math.Abs(iMaxLoss))
         {
@@ -284,12 +278,12 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
         bool closeLong = (red && candle.Open < t3 && candle.Close < t3) && CurrentPosition > 0;
         bool closeShort = (green && candle.Open > t3 && candle.Close > t3) && CurrentPosition < 0;
 
-        if (!bAttendedMode && red && candle.Open < t3 && candle.Close < t3 && CurrentPosition > 0)
+        if (red && candle.Open < t3 && candle.Close < t3 && CurrentPosition > 0)
         {
             CloseCurrentPosition("T3 crossed", bar);
             prevBar = -1;
         }
-        if (!bAttendedMode && green && candle.Open > t3 && candle.Close > t3 && CurrentPosition < 0)
+        if (green && candle.Open > t3 && candle.Close > t3 && CurrentPosition < 0)
         {
             CloseCurrentPosition("T3 crossed", bar);
             prevBar = -1;
@@ -317,6 +311,18 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
         #endregion
 
+        if (bShowLines && bEnterEMA200)
+            _lineEMA200[pbar] = e200;
+
+        if (bShowLines && bEnterEMA21)
+            _lineEMA21[pbar] = e21;
+
+        if (bShowLines && bEnterKAMA9)
+            _lineKAMA[pbar] = kama9;
+
+        if (bShowLines && bEnterVWAP)
+            _lineVWAP[pbar] = vwap;
+
     }
 
     #region POSITION METHODS
@@ -337,31 +343,9 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
         //OpenOrder(order);
     }
 
-    private void BouncePosition(String sReason, IndicatorCandle c, int bar, OrderDirections direction)
-    {
-        if (CurrentPosition != 0)
-        {
-            CloseCurrentPosition("Closing current before opening new", bar);
-            OpenPosition(sReason, c, bar, direction);
-        }
-        else
-        {
-            OpenPosition(sReason, c, bar, direction);
-        }
-    }
-
     private void OpenPosition(String sReason, IndicatorCandle c, int bar, OrderDirections direction)
     {
-        if (iBotStatus == STOPPED)
-        {
-            AddLog("Attempted to open position, but bot was stopped");
-            return;
-        }
-        if (CurrentPosition >= iAdvMaxContracts)
-        {
-            AddLog("Attempted to open more than (max) contracts, trade canceled");
-            return;
-        }
+        var sD = "";
 
         // Limit 1 order per bar
         if (iPrevOrderBar == bar)
@@ -369,8 +353,34 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
         else
             iPrevOrderBar = bar;
 
-        var sD = direction == OrderDirections.Buy ? sReason + " LONG (" + bar + ")" : sReason + " SHORT (" + bar + ")";
-        sLastTrade = direction == OrderDirections.Buy ? "Bar " + bar + " - " + sReason + " LONG at " + c.Close : "Bar " + bar + " - " + sReason + " SHORT at " + c.Close;
+        if (iBotStatus == STOPPED)
+        {
+            AddLog("Attempted to open position, but bot was stopped");
+            return;
+        }
+
+        decimal _tick = ChartInfo.PriceChartContainer.Step;
+        if (direction == OrderDirections.Buy)
+        {
+            _posSeries[bar-1] = c.Low - (_tick * 2);
+            sD = sReason + " LONG (" + bar + ")";
+            sLastTrade = "Bar " + bar + " - " + sReason + " LONG at " + c.Close;
+        }
+        else
+        {
+            sD = sReason + " SHORT (" + bar + ")";
+            sLastTrade = "Bar " + bar + " - " + sReason + " SHORT at " + c.Close;
+            _negSeries[bar-1] = c.High + (_tick * 2);
+        }
+
+        if (iBotType == 3) // "Indicator Mode (no trades)"
+            return;
+
+        if (CurrentPosition >= iAdvMaxContracts)
+        {
+            AddLog("Attempted to open more than (max) contracts, trade canceled");
+            return;
+        }
 
         var order = new Order
         {
@@ -389,6 +399,9 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 
     private void CloseCurrentPosition(String s, int bar)
     {
+        if (iBotType > 1) // "Indicator Mode (no trades)"
+            return;
+
         if (iBotStatus == STOPPED)
         {
             AddLog("Attempted to close position, but bot was stopped");
@@ -468,6 +481,44 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private void AddLog(String s)
     {
         sLastLog = s;
+    }
+
+    protected int CheckLineWick(decimal line, bool chec, IndicatorCandle candle)
+    {
+        int iRes = 0;
+        if (!chec) return 0;
+
+        var red = candle.Close < candle.Open;
+        var green = candle.Close > candle.Open;
+
+        if (green && candle.Open > line && candle.Low < line)
+            iRes = 1;
+
+        if (red && candle.Open < line && candle.High > line)
+            iRes = -1;
+
+        if (iTradeDirection == 2 && iRes == -1) // Value = 2, Name = "Longs only"
+        {
+            AddLog("Wanted to short, but settings: LONG ONLY");
+            iRes = 0;
+        }
+        if (iTradeDirection == 3 && iRes == 1) // Value = 3, Name = "Shorts only"
+        {
+            AddLog("Wanted to long, but settings: SHORT ONLY");
+            iRes = 0;
+        }
+        if (iTradeDirection == 4 && iRes == 1 && st < 0) // Value = 4, Name = "With supertrend"
+        {
+            AddLog("Skipped trade due to 'With Trend Only' setting");
+            iRes = 0;
+        }
+        if (iTradeDirection == 4 && iRes == -1 && st > 0) // Value = 4, Name = "With supertrend"
+        {
+            AddLog("Skipped trade due to 'With Trend Only' setting");
+            iRes = 0;
+        }
+
+        return iRes;
     }
 
     #endregion
