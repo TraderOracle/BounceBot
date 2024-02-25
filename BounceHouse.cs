@@ -12,6 +12,8 @@ using static ATAS.Indicators.Technical.SampleProperties;
 using String = System.String;
 using Utils.Common.Logging;
 using System;
+using OFT.Attributes.Editors;
+using System.Collections.ObjectModel;
 
 public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
 {
@@ -25,6 +27,7 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private int _lastBar = -1;
     private int globalBar = -1;
     private bool _lastBarCounted = false;
+    decimal st = 0;
 
     private int iPrevOrderBar = -1;
     private int iFontSize = 12;
@@ -38,6 +41,8 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private int iMinADX = 0;
     private decimal iBuffer = 0;
 
+    #endregion
+
     #region TRADING OPTIONS
 
     private bool bEnterKAMA9 = true;
@@ -48,18 +53,23 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private int iAdvMaxContracts = 20;
     private int iMaxLoss = 50000;
     private int iMaxProfit = 50000;
+    private int iTradeDirection = 1;
 
-    [Display(GroupName = "Trade When These Lines Wicked", Name = "Kaufman Avg 9")]
-    public bool EnterKAMA9 { get => bEnterKAMA9; set { bEnterKAMA9 = value; RecalculateValues(); } }
-
-    [Display(GroupName = "Trade When These Lines Wicked", Name = "Daily VWAP")]
-    public bool EnterVWAP { get => bEnterVWAP; set { bEnterVWAP = value; RecalculateValues(); } }
-
-    [Display(GroupName = "Trade When These Lines Wicked", Name = "200 EMA")]
-    public bool EnterEMA200 { get => bEnterEMA200; set { bEnterEMA200 = value; RecalculateValues(); } }
-
-    [Display(GroupName = "Trade When These Lines Wicked", Name = "21 EMA")]
-    public bool EnterEMA21 { get => bEnterEMA21; set { bEnterEMA21 = value; RecalculateValues(); } }
+    private class tradeDir : Collection<Entity>
+    {
+        public tradeDir()
+            : base(new[]
+            {
+                    new Entity { Value = 1, Name = "Both long and short" },
+                    new Entity { Value = 2, Name = "Longs only" },
+                    new Entity { Value = 3, Name = "Shorts only" },
+                    new Entity { Value = 4, Name = "With trend direction" },
+            })
+        { }
+    }
+    [Display(GroupName = "General", Name = "Trade Direction")]
+    [ComboBoxEditor(typeof(tradeDir), DisplayMember = nameof(Entity.Name), ValueMember = nameof(Entity.Value))]
+    public int trDir { get => iTradeDirection; set { if (value < 0) return; iTradeDirection = value; RecalculateValues(); } }
 
     [Display(GroupName = "General", Name = "Attended Mode", Description = "You handle the stops, take profits")]
     public bool AttendedMode { get => bAttendedMode; set { bAttendedMode = value; RecalculateValues(); } }
@@ -76,8 +86,17 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     [Range(1, 90000)]
     public int MaxProfit { get => iMaxProfit; set { iMaxProfit = value; RecalculateValues(); } }
 
-    #endregion
+    [Display(GroupName = "Trade When These Lines Wicked", Name = "Kaufman Avg 9")]
+    public bool EnterKAMA9 { get => bEnterKAMA9; set { bEnterKAMA9 = value; RecalculateValues(); } }
 
+    [Display(GroupName = "Trade When These Lines Wicked", Name = "Daily VWAP")]
+    public bool EnterVWAP { get => bEnterVWAP; set { bEnterVWAP = value; RecalculateValues(); } }
+
+    [Display(GroupName = "Trade When These Lines Wicked", Name = "200 EMA")]
+    public bool EnterEMA200 { get => bEnterEMA200; set { bEnterEMA200 = value; RecalculateValues(); } }
+
+    [Display(GroupName = "Trade When These Lines Wicked", Name = "21 EMA")]
+    public bool EnterEMA21 { get => bEnterEMA21; set { bEnterEMA21 = value; RecalculateValues(); } }
 
     #endregion
 
@@ -88,6 +107,8 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
     private readonly EMA Ema200 = new EMA() { Period = 200 };
     private readonly KAMA _kama9 = new KAMA() { ShortPeriod = 2, LongPeriod = 109, EfficiencyRatioPeriod = 9 };
     private readonly T3 _t3 = new T3() { Period = 10, Multiplier = 1 };
+    private readonly Pivots _pivots = new Pivots();
+    private readonly SuperTrend _st = new SuperTrend() { Period = 11, Multiplier = 2m };
 
     #endregion
 
@@ -154,24 +175,36 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
         EnableCustomDrawing = true;
         Add(_kama9);
         Add(_VWAP);
+        Add(_pivots);
+        Add(_st);
 
         iBuffer = 10;
     }
 
     protected int CheckLineWick(decimal line, bool chec, IndicatorCandle candle)
     {
-        if (!chec)return 0;
+        int iRes = 0;
+        if (!chec) return 0;
 
         var red = candle.Close < candle.Open;
         var green = candle.Close > candle.Open;
 
         if (green && candle.Open > line && candle.Low < line)
-            return 1;
+            iRes = 1;
 
         if (red && candle.Open < line && candle.High > line)
-            return -1;
+            iRes = -1;
 
-        return 0;
+        if (iTradeDirection == 2 && iRes == -1) // Value = 2, Name = "Longs only"
+            return 0;
+        if (iTradeDirection == 3 && iRes == 1) // Value = 3, Name = "Shorts only"
+            return 0;
+        if (iTradeDirection == 4 && iRes == 1 && st < 0) // Value = 4, Name = "With supertrend"
+            return 0;
+        if (iTradeDirection == 4 && iRes == -1 && st > 0) // Value = 4, Name = "With supertrend"
+            return 0;
+
+        return iRes;
     }
 
     protected override void OnCalculate(int bar, decimal value)
@@ -215,6 +248,8 @@ public class BounceHouse : ATAS.Strategies.Chart.ChartStrategy
         var e21 = ((ValueDataSeries)Ema21.DataSeries[0])[pbar];
         var vwap = ((ValueDataSeries)_VWAP.DataSeries[0])[pbar];
         var t3 = ((ValueDataSeries)_t3.DataSeries[0])[pbar];
+        var pvt = ((ValueDataSeries)_pivots.DataSeries[0])[pbar];
+        st = ((ValueDataSeries)_st.DataSeries[0])[pbar];
 
         #endregion
 
